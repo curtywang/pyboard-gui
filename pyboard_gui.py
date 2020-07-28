@@ -12,11 +12,13 @@ class PyboardGUI(tk.Frame):
         self.master = master
         self.master.minsize(800, 600)
         self.winfo_toplevel().title('Pyboard.py GUI')
+        self.master.protocol("WM_DELETE_WINDOW", self.quit_clean)
         self.widgets = {}
         self.pyboard = None
         self.tk_vars = {}
         self.grid()
         self.create_widgets()
+        self.lift()
 
     def create_widgets(self):
         self.widgets['btn_hi'] = tk.Label(
@@ -220,9 +222,6 @@ class PyboardGUI(tk.Frame):
     def quit_clean(self):
         self.destroy_pyboard()
         self.master.destroy()
-
-    def destroy(self):
-        self.quit_clean()
 
     @staticmethod
     def get_serial_ports() -> List[str]:
