@@ -347,6 +347,7 @@ class PyboardGUI(tk.Frame):
             logging.exception(e)
         self.pyboard = None
         self.update_connect_text_and_buttons()
+        self.disable_board_widgets()
         return
 
     def create_pyboard(self):
