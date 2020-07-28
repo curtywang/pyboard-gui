@@ -1,12 +1,48 @@
-from typing import List, Dict, Tuple
+from typing import List, Dict
 import logging
 import tkinter as tk
 import tkinter.filedialog as tkfd
 import tkinter.messagebox as tkmb
+import tkinter.scrolledtext as tkst
 import pyboard as pyb
 import serial
 import serial.tools.list_ports
 import os
+import sys
+from io import StringIO
+
+
+class LoggerWriter:
+    def __init__(self, level):
+        # self.level is really like using log.debug(message)
+        # at least in my case
+        self.level = level
+
+    def write(self, message):
+        # if statement reduces the amount of newlines that are
+        # printed to the logger
+        if message != '\n':
+            self.level(message)
+
+    def flush(self):
+        # create a flush method so things can be flushed when
+        # the system wants to. Not sure if simply 'printing'
+        # sys.stderr is the correct way to do it, but it seemed
+        # to work properly for me.
+        self.level(sys.stderr)
+
+
+class StdoutRedirector(StringIO):
+    def __init__(self, text_widget):
+        super().__init__()
+        self.text_space = text_widget
+
+    def write(self, string):
+        self.text_space.configure(state=tk.NORMAL)
+        self.text_space.insert(tk.END, string)
+        self.text_space.insert(tk.END, 'over')
+        self.text_space.see(tk.END)
+        self.text_space.configure(state=tk.DISABLED)
 
 
 class PyboardGUI(tk.Frame):
@@ -25,6 +61,9 @@ class PyboardGUI(tk.Frame):
         self.create_board_widgets()
         self.disable_board_widgets()
         self.lift()
+        self.safe_files = ['boot.py']
+        self.redirector = StdoutRedirector(self.board_widgets['text_console'])
+        logging.info('Pyboard.py GUI initialized!')
 
     def create_widgets(self):
         self.widgets['btn_hi'] = tk.Label(
@@ -103,6 +142,7 @@ class PyboardGUI(tk.Frame):
             sticky=tk.W)
 
     def create_board_widgets(self):
+        # TODO: each group should be a separate tk.Frame
         # Files listbox widget group
         self.board_widgets['label_files'] = tk.Label(
             self, text='Files on board:')
@@ -134,19 +174,44 @@ class PyboardGUI(tk.Frame):
             text='Delete selected file',
             command=self.delete_file_board)
         self.board_widgets['btn_delete_file'].grid(
-            row=14, column=2, sticky=tk.W)
+            row=15, column=2, sticky=tk.W)
         self.board_widgets['btn_upload_file'] = tk.Button(
             self,
             text='Upload file to board',
             command=self.upload_file_board)
         self.board_widgets['btn_upload_file'].grid(
-            row=15, column=2, sticky=tk.W)
+            row=17, column=2, sticky=tk.W)
+        self.board_widgets['btn_exec_file'] = tk.Button(
+            self,
+            text='Pick and run file from host',
+            command=self.exec_host_file_board)
+        self.board_widgets['btn_exec_file'].grid(
+            row=18, column=2, sticky=tk.W)
 
         # File view widget
-        self.board_widgets['text_view_file'] = tk.Text(
-            self, state=tk.DISABLED)
+        self.board_widgets['label_view_file'] = tk.Label(
+            self, text='File contents:')
+        self.board_widgets['label_view_file'].grid(
+            row=0,
+            column=3,
+            sticky=tk.W)
+        self.board_widgets['text_view_file'] = tkst.ScrolledText(
+            self, state=tk.DISABLED, height=15, width=40, wrap="none")
         self.board_widgets['text_view_file'].grid(
-            row=0, column=3, rowspan=20, sticky=tk.W)
+            row=1, column=3, rowspan=20, sticky=tk.W)
+
+        # Console widget
+        self.board_widgets['label_console'] = tk.Label(
+            self, text='Board output:')
+        self.board_widgets['label_console'].grid(
+            row=20,
+            column=1,
+            columnspan=3,
+            sticky=tk.W)
+        self.board_widgets['text_console'] = tkst.ScrolledText(
+            self, state=tk.DISABLED, height=10, width=80)
+        self.board_widgets['text_console'].grid(
+            row=21, column=1, rowspan=5, columnspan=3, sticky=tk.W)
 
     def disable_board_widgets(self):
         for widget in self.board_widgets.values():
@@ -156,10 +221,42 @@ class PyboardGUI(tk.Frame):
         for widget in self.board_widgets.values():
             widget['state'] = tk.NORMAL
 
-    def upload_file_board(self):
+    # def exec_selected_file_board(self):
+    #     try:
+    #         filename = self.get_selected_file_board_listbox()
+    #         self.pyboard.enter_raw_repl()
+    #         self.pyboard.exec(src=filename)
+    #         self.pyboard.exit_raw_repl()
+    #         self.update_files_board_listbox()
+    #     except Exception as e:
+    #         logging.exception(e)
+    #         tkmb.showerror(title='Error!',
+    #                        message='Error deleting file!')
+    #     return
+
+    def exec_host_file_board(self):
+        # TODO: redirect sys.stdout.buffer to text
+        try:
+            selected_file = tkfd.askopenfile(defaultextension='py')
+            filename = selected_file.name
+            self.pyboard.enter_raw_repl()
+            self.pyboard.exec(src=filename)
+            self.pyboard.exit_raw_repl()
+            self.update_files_board_listbox()
+        except Exception as e:
+            logging.exception(e)
+            tkmb.showerror(title='Error!',
+                           message='Error deleting file!')
+        return
+
+    def upload_file_board(self, safemode=True):
         selected_file = tkfd.askopenfile(defaultextension='py')
         filename = os.path.basename(selected_file.name)
         filepath = selected_file.name
+        if safemode and filename in self.safe_files:
+            tkmb.showerror(title='Error!',
+                           message='Cannot delete protected file!')
+            return
         try:
             self.pyboard.enter_raw_repl()
             self.pyboard.fs_put(src=filepath, dest=filename)
@@ -167,19 +264,25 @@ class PyboardGUI(tk.Frame):
             self.update_files_board_listbox()
         except Exception as e:
             logging.exception(e)
-            tkmb.showerror('Error uploading file!')
+            tkmb.showerror(title='Upload error!',
+                           message='Error uploading file!')
         return
 
-    def delete_file_board(self):
+    def delete_file_board(self, safemode=True):
         try:
             filename = self.get_selected_file_board_listbox()
+            if safemode and filename in self.safe_files:
+                tkmb.showerror(title='Error!',
+                               message='Cannot delete protected file!')
+                return
             self.pyboard.enter_raw_repl()
             self.pyboard.fs_rm(src=filename)
             self.pyboard.exit_raw_repl()
             self.update_files_board_listbox()
         except Exception as e:
             logging.exception(e)
-            tkmb.showerror('Error deleting file!')
+            tkmb.showerror(title='Error!',
+                           message='Error deleting file!')
         return
 
     def get_selected_file_board_listbox(self):
@@ -216,11 +319,13 @@ class PyboardGUI(tk.Frame):
             self.widgets['label_connect']['fg'] = 'green'
             self.widgets['btn_connect']['text'] = 'Disconnect'
             self.widgets['btn_connect']['command'] = self.destroy_pyboard
+            logging.info('MicroPython board connected!')
         else:
             self.widgets['label_connect']['text'] = 'Connect status: \nUnconnected'
             self.widgets['label_connect']['fg'] = 'red'
             self.widgets['btn_connect']['text'] = 'Connect to Board'
             self.widgets['btn_connect']['command'] = self.connect_to_board
+            logging.info('MicroPython board disconnected!')
         return
 
     def connect_to_board(self):
@@ -287,6 +392,12 @@ class PyboardGUI(tk.Frame):
 
 
 def run_main_window():
+    logging.basicConfig(format='%(asctime)s %(message)s',
+                        datefmt='%m/%d/%Y %I:%M:%S %p')
+    # TODO: logger should also send to text_console
+    log = logging.getLogger()
+    sys.stdout = LoggerWriter(log.debug)
+    sys.stderr = LoggerWriter(log.warning)
     root = tk.Tk()
     app = PyboardGUI(master=root)
     app.mainloop()
