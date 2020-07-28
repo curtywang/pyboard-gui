@@ -1,9 +1,12 @@
 from typing import List, Dict, Tuple
 import logging
 import tkinter as tk
+import tkinter.filedialog as tkfd
+import tkinter.messagebox as tkmb
 import pyboard as pyb
 import serial
 import serial.tools.list_ports
+import os
 
 
 class PyboardGUI(tk.Frame):
@@ -14,10 +17,13 @@ class PyboardGUI(tk.Frame):
         self.winfo_toplevel().title('Pyboard.py GUI')
         self.master.protocol("WM_DELETE_WINDOW", self.quit_clean)
         self.widgets = {}
+        self.board_widgets = {}
         self.pyboard = None
         self.tk_vars = {}
         self.grid()
         self.create_widgets()
+        self.create_board_widgets()
+        self.disable_board_widgets()
         self.lift()
 
     def create_widgets(self):
@@ -96,47 +102,98 @@ class PyboardGUI(tk.Frame):
             column=1,
             sticky=tk.W)
 
+    def create_board_widgets(self):
         # Files listbox widget group
-        self.widgets['label_files_board'] = tk.Label(
+        self.board_widgets['label_files'] = tk.Label(
             self, text='Files on board:')
-        self.widgets['label_files_board'].grid(
+        self.board_widgets['label_files'].grid(
             row=0,
             column=2,
             sticky=tk.W)
-        self.widgets['listbox_files_board'] = tk.Listbox(
+        self.board_widgets['listbox_files'] = tk.Listbox(
             self, selectmode=tk.SINGLE)
-        self.widgets['listbox_files_board'].grid(
+        self.board_widgets['listbox_files'].grid(
             row=1,
             column=2,
             rowspan=10,
             sticky=tk.W)
-        self.widgets['btn_refresh_files_board'] = tk.Button(
+        self.board_widgets['btn_refresh_files'] = tk.Button(
             self,
             text='Refresh files',
             command=self.update_files_board_listbox)
-        self.widgets['btn_refresh_files_board'].grid(
+        self.board_widgets['btn_refresh_files'].grid(
             row=12, column=2, sticky=tk.W)
-        self.widgets['btn_view_file_board'] = tk.Button(
+        self.board_widgets['btn_view_file'] = tk.Button(
             self,
             text='View selected file',
             command=self.view_file_board_listbox)
-        self.widgets['btn_view_file_board'].grid(
+        self.board_widgets['btn_view_file'].grid(
             row=13, column=2, sticky=tk.W)
+        self.board_widgets['btn_delete_file'] = tk.Button(
+            self,
+            text='Delete selected file',
+            command=self.delete_file_board)
+        self.board_widgets['btn_delete_file'].grid(
+            row=14, column=2, sticky=tk.W)
+        self.board_widgets['btn_upload_file'] = tk.Button(
+            self,
+            text='Upload file to board',
+            command=self.upload_file_board)
+        self.board_widgets['btn_upload_file'].grid(
+            row=15, column=2, sticky=tk.W)
 
         # File view widget
-        self.widgets['text_view_file_board'] = tk.Text(
+        self.board_widgets['text_view_file'] = tk.Text(
             self, state=tk.DISABLED)
-        self.widgets['text_view_file_board'].grid(
+        self.board_widgets['text_view_file'].grid(
             row=0, column=3, rowspan=20, sticky=tk.W)
 
+    def disable_board_widgets(self):
+        for widget in self.board_widgets.values():
+            widget['state'] = tk.DISABLED
+
+    def enable_board_widgets(self):
+        for widget in self.board_widgets.values():
+            widget['state'] = tk.NORMAL
+
+    def upload_file_board(self):
+        selected_file = tkfd.askopenfile(defaultextension='py')
+        filename = os.path.basename(selected_file.name)
+        filepath = selected_file.name
+        try:
+            self.pyboard.enter_raw_repl()
+            self.pyboard.fs_put(src=filepath, dest=filename)
+            self.pyboard.exit_raw_repl()
+            self.update_files_board_listbox()
+        except Exception as e:
+            logging.exception(e)
+            tkmb.showerror('Error uploading file!')
+        return
+
+    def delete_file_board(self):
+        try:
+            filename = self.get_selected_file_board_listbox()
+            self.pyboard.enter_raw_repl()
+            self.pyboard.fs_rm(src=filename)
+            self.pyboard.exit_raw_repl()
+            self.update_files_board_listbox()
+        except Exception as e:
+            logging.exception(e)
+            tkmb.showerror('Error deleting file!')
+        return
+
+    def get_selected_file_board_listbox(self):
+        src_index = self.board_widgets['listbox_files'].curselection()
+        src = self.board_widgets['listbox_files'].get(src_index).split(':')[0]
+        return src
+
     def view_file_board_listbox(self):
-        src_index = self.widgets['listbox_files_board'].curselection()
-        src = self.widgets['listbox_files_board'].get(src_index).split(':')[0]
+        src = self.get_selected_file_board_listbox()
         filetext = self.pyboard_view_file(src)
-        self.widgets['text_view_file_board']['state'] = tk.NORMAL
-        self.widgets['text_view_file_board'].delete(1.0, tk.END)
-        self.widgets['text_view_file_board'].insert(tk.END, filetext)
-        self.widgets['text_view_file_board']['state'] = tk.DISABLED
+        self.board_widgets['text_view_file']['state'] = tk.NORMAL
+        self.board_widgets['text_view_file'].delete(1.0, tk.END)
+        self.board_widgets['text_view_file'].insert(tk.END, filetext)
+        self.board_widgets['text_view_file']['state'] = tk.DISABLED
         return
 
     def pyboard_view_file(self, src='', chunk_size=256) -> str:
@@ -172,6 +229,7 @@ class PyboardGUI(tk.Frame):
             logging.error('Unable to connect!')
         else:
             self.update_connect_text_and_buttons()
+            self.enable_board_widgets()
             self.update_files_board_listbox()
         return
 
@@ -196,8 +254,8 @@ class PyboardGUI(tk.Frame):
             return False
 
     def update_files_board_listbox(self):
-        self.widgets['listbox_files_board'].delete(0, tk.END)
-        [self.widgets['listbox_files_board'].insert(tk.END, f'{filename}: {size}')
+        self.board_widgets['listbox_files'].delete(0, tk.END)
+        [self.board_widgets['listbox_files'].insert(tk.END, f'{filename}: {size}')
          for filename, size in self.pyboard_list_files().items()]
         return
 
