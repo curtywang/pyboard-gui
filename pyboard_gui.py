@@ -281,6 +281,7 @@ class PyboardGUI(tk.Frame):
         for widget in self.console_widgets.values():
             widget['state'] = tk.NORMAL
         self.console_widgets['text_serial']['state'] = tk.DISABLED
+        self.console_widgets['log']['state'] = tk.DISABLED
 
     # def exec_selected_file_board(self):
     #     try:
