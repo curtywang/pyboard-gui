@@ -12,22 +12,6 @@ import sys
 from io import StringIO
 
 
-class LoggingToGUI(logging.Handler):
-    """ Used to redirect logging output to the widget passed in parameters """
-
-    def __init__(self, console):
-        logging.Handler.__init__(self)
-        self.console = console  # Any text widget, you can use the class above or not
-
-    def emit(self, message):  # Overwrites the default handler's emit method
-        formatted_message = self.format(message)
-        self.console.configure(state=tk.NORMAL)
-        self.console.insert(tk.END, formatted_message)
-        self.console.insert(tk.END, '\n')
-        self.console.configure(state=tk.DISABLED)
-        self.console.see(tk.END)
-
-
 class StdoutRedirector(StringIO):
     def __init__(self, text_widget):
         super().__init__()
@@ -50,6 +34,7 @@ class PyboardGUI(tk.Frame):
         self.widgets = {}
         self.frames = {}
         self.board_widgets = {}
+        self.console_widgets = {}
         self.pyboard = None
         self.tk_vars = {}
         self.grid()
@@ -61,15 +46,15 @@ class PyboardGUI(tk.Frame):
         self.disable_board_widgets()
         self.lift()
         self.safe_files = ['boot.py']
-        self.logging_handler = LoggingToGUI(self.board_widgets['log'])
-        self.redirector = StdoutRedirector(self.board_widgets['log'])
+        self.logging_redirector = StdoutRedirector(self.console_widgets['log'])
         logging.basicConfig(format='%(asctime)s %(message)s',
                             datefmt='%m/%d/%Y %I:%M:%S %p',
                             level=logging.INFO,
-                            stream=self.redirector)
-        sys.stdout = self.redirector
-        sys.stderr = self.redirector
-        pyb.reset_stdout(self.redirector)
+                            stream=self.logging_redirector)
+        sys.stdout = self.logging_redirector
+        sys.stderr = self.logging_redirector
+        self.serial_redirector = StdoutRedirector(self.console_widgets['text_serial'])
+        pyb.reset_stdout(self.serial_redirector)
         logging.info('Pyboard.py GUI initialized!')
 
     def create_widgets(self):
@@ -231,20 +216,34 @@ class PyboardGUI(tk.Frame):
             row=1, column=0, columnspan=3, sticky=tk.NSEW)
 
         # Console widget
-        self.board_widgets['text_console'] = tkst.ScrolledText(
+        self.console_widgets['text_serial'] = tkst.ScrolledText(
             self.frames['console'], state=tk.DISABLED, height=10, width=100)
-        self.board_widgets['text_console'].grid(
+        self.console_widgets['text_serial'].grid(
             row=0, column=0, columnspan=3, sticky=tk.W)
 
+        # Console entry
+        self.console_widgets['entry_serial'] = tk.Entry(
+            self.frames['console'],
+            text='Type your command here',
+            width=80,
+            font='TkFixedFont')
+        self.console_widgets['entry_serial'].grid(
+            row=1, column=1, columnspan=2, sticky=tk.SW, ipadx=1, ipady=1)
+        self.console_widgets['entry_serial'].bind('<Return>', self.send_console_command)
+
         # Exec host file
-        self.board_widgets['btn_exec_file'] = tk.Button(
+        self.console_widgets['btn_exec_file'] = tk.Button(
             self.frames['console'],
             text='Pick and run file from host',
             command=self.exec_host_file_board)
-        self.board_widgets['btn_exec_file'].grid(
-            row=1, column=2, sticky=tk.SE)
+        self.console_widgets['btn_exec_file'].grid(
+            row=1, column=0, sticky=tk.SW, padx=4)
 
-        # serial command entry
+    def send_console_command(self, event=None):
+        typed_command = self.console_widgets['entry_serial'].get()
+        self.serial_redirector.write(f'>> {typed_command}\n')
+        self.exec_command(typed_command)
+        self.console_widgets['entry_serial'].delete(0, tk.END)
 
     def create_program_log_widgets(self):
         self.frames['log'] = tk.LabelFrame(
@@ -257,9 +256,9 @@ class PyboardGUI(tk.Frame):
             row=2, column=0, columnspan=3, sticky=tk.S)
 
         # Logging widget
-        self.board_widgets['log'] = tkst.ScrolledText(
+        self.console_widgets['log'] = tkst.ScrolledText(
             self.frames['log'], state=tk.DISABLED, height=5, width=100)
-        self.board_widgets['log'].grid(
+        self.console_widgets['log'].grid(
             row=0, column=0, sticky=tk.W)
 
     def disable_board_widgets(self):
@@ -283,8 +282,20 @@ class PyboardGUI(tk.Frame):
     #                        message='Error deleting file!')
     #     return
 
+    def exec_command(self, command: str):
+        try:
+            self.pyboard.enter_raw_repl()
+            ret, ret_err = self.pyboard.exec_raw(
+                command, timeout=None, data_consumer=pyb.stdout_write_bytes)
+            self.pyboard.exit_raw_repl()
+            return ret
+        except Exception as e:
+            logging.exception(e)
+            tkmb.showerror(title='Error!',
+                           message='Error running command!')
+        return
+
     def exec_host_file_board(self):
-        # TODO: redirect sys.stdout.buffer to serial console
         try:
             selected_file = tkfd.askopenfile(defaultextension='py')
             filename = selected_file.name
