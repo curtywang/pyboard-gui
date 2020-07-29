@@ -12,6 +12,9 @@ import sys
 from io import StringIO
 
 
+# TODO: tkinter Text widgets need to expand as window expands
+
+
 class StdoutRedirector(StringIO):
     def __init__(self, text_widget):
         super().__init__()
@@ -44,6 +47,7 @@ class PyboardGUI(tk.Frame):
         self.create_console_widgets()
         self.create_program_log_widgets()
         self.disable_board_widgets()
+        self.disable_console_widgets()
         self.lift()
         self.safe_files = ['boot.py']
         self.logging_redirector = StdoutRedirector(self.console_widgets['log'])
@@ -265,9 +269,18 @@ class PyboardGUI(tk.Frame):
         for widget in self.board_widgets.values():
             widget['state'] = tk.DISABLED
 
+    def disable_console_widgets(self):
+        for widget in self.console_widgets.values():
+            widget['state'] = tk.DISABLED
+
     def enable_board_widgets(self):
         for widget in self.board_widgets.values():
             widget['state'] = tk.NORMAL
+
+    def enable_console_widgets(self):
+        for widget in self.console_widgets.values():
+            widget['state'] = tk.NORMAL
+        self.console_widgets['text_serial']['state'] = tk.DISABLED
 
     # def exec_selected_file_board(self):
     #     try:
@@ -395,6 +408,7 @@ class PyboardGUI(tk.Frame):
         else:
             self.update_connect_text_and_buttons()
             self.enable_board_widgets()
+            self.enable_console_widgets()
             self.update_files_board_listbox()
         return
 
@@ -408,6 +422,7 @@ class PyboardGUI(tk.Frame):
         self.pyboard = None
         self.update_connect_text_and_buttons()
         self.disable_board_widgets()
+        self.disable_console_widgets()
         return
 
     def create_pyboard(self):
