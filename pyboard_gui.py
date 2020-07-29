@@ -12,24 +12,20 @@ import sys
 from io import StringIO
 
 
-class LoggerWriter:
-    def __init__(self, level):
-        # self.level is really like using log.debug(message)
-        # at least in my case
-        self.level = level
+class LoggingToGUI(logging.Handler):
+    """ Used to redirect logging output to the widget passed in parameters """
 
-    def write(self, message):
-        # if statement reduces the amount of newlines that are
-        # printed to the logger
-        if message != '\n':
-            self.level(message)
+    def __init__(self, console):
+        logging.Handler.__init__(self)
+        self.console = console  # Any text widget, you can use the class above or not
 
-    def flush(self):
-        # create a flush method so things can be flushed when
-        # the system wants to. Not sure if simply 'printing'
-        # sys.stderr is the correct way to do it, but it seemed
-        # to work properly for me.
-        self.level(sys.stderr)
+    def emit(self, message):  # Overwrites the default handler's emit method
+        formatted_message = self.format(message)
+        self.console.configure(state=tk.NORMAL)
+        self.console.insert(tk.END, formatted_message)
+        self.console.insert(tk.END, '\n')
+        self.console.configure(state=tk.DISABLED)
+        self.console.see(tk.END)
 
 
 class StdoutRedirector(StringIO):
@@ -40,7 +36,6 @@ class StdoutRedirector(StringIO):
     def write(self, string):
         self.text_space.configure(state=tk.NORMAL)
         self.text_space.insert(tk.END, string)
-        self.text_space.insert(tk.END, 'over')
         self.text_space.see(tk.END)
         self.text_space.configure(state=tk.DISABLED)
 
@@ -53,28 +48,48 @@ class PyboardGUI(tk.Frame):
         self.winfo_toplevel().title('Pyboard.py GUI')
         self.master.protocol("WM_DELETE_WINDOW", self.quit_clean)
         self.widgets = {}
+        self.frames = {}
         self.board_widgets = {}
         self.pyboard = None
         self.tk_vars = {}
         self.grid()
         self.create_widgets()
         self.create_board_widgets()
+        self.create_view_widgets()
+        self.create_console_widgets()
+        self.create_program_log_widgets()
         self.disable_board_widgets()
         self.lift()
         self.safe_files = ['boot.py']
-        self.redirector = StdoutRedirector(self.board_widgets['text_console'])
+        self.logging_handler = LoggingToGUI(self.board_widgets['log'])
+        self.redirector = StdoutRedirector(self.board_widgets['log'])
+        logging.basicConfig(format='%(asctime)s %(message)s',
+                            datefmt='%m/%d/%Y %I:%M:%S %p',
+                            level=logging.INFO,
+                            stream=self.redirector)
+        sys.stdout = self.redirector
+        sys.stderr = self.redirector
+        pyb.reset_stdout(self.redirector)
         logging.info('Pyboard.py GUI initialized!')
 
     def create_widgets(self):
-        self.widgets['btn_hi'] = tk.Label(
+        self.frames['connect'] = tk.LabelFrame(
             self,
+            text='Board connection',
+            padx=5,
+            pady=5
+        )
+        self.frames['connect'].grid(
+            row=0, column=0, sticky=tk.NW)
+        self.widgets['btn_hi'] = tk.Label(
+            self.frames['connect'],
             text="Pyboard.py GUI")
         self.widgets['btn_hi'].grid(
             row=0,
             column=0,
             sticky=tk.E)
         self.widgets['btn_quit'] = tk.Button(
-            self,
+            self.frames['connect'],
             text="QUIT",
             command=self.quit_clean)
         self.widgets['btn_quit'].grid(
@@ -84,7 +99,7 @@ class PyboardGUI(tk.Frame):
 
         # Port widget group
         self.widgets['label_port'] = tk.Label(
-            self,
+            self.frames['connect'],
             text='Serial port:')
         self.widgets['label_port'].grid(
             row=2,
@@ -94,7 +109,7 @@ class PyboardGUI(tk.Frame):
         self.tk_vars['port'] = tk.StringVar(self)
         self.tk_vars['port'].set(ports[0])
         self.widgets['dropdown_port'] = tk.OptionMenu(
-            self,
+            self.frames['connect'],
             self.tk_vars['port'],
             ports[0],
             *ports[1:])
@@ -105,7 +120,7 @@ class PyboardGUI(tk.Frame):
 
         # Baudrate widget group
         self.widgets['label_baudrate'] = tk.Label(
-            self, text='Baudrate:')
+            self.frames['connect'], text='Baudrate:')
         self.widgets['label_baudrate'].grid(
             row=3,
             column=0,
@@ -114,7 +129,7 @@ class PyboardGUI(tk.Frame):
         self.tk_vars['baudrate'] = tk.StringVar(self)
         self.tk_vars['baudrate'].set(baudrates[0])
         self.widgets['dropdown_baudrate'] = tk.OptionMenu(
-            self,
+            self.frames['connect'],
             self.tk_vars['baudrate'],
             baudrates[0],
             *baudrates[1:])
@@ -125,7 +140,7 @@ class PyboardGUI(tk.Frame):
 
         # Connect widget group
         self.widgets['label_connect'] = tk.Label(
-            self,
+            self.frames['connect'],
             text='Connect status: \nUnconnected',
             fg='red')
         self.widgets['label_connect'].grid(
@@ -133,7 +148,7 @@ class PyboardGUI(tk.Frame):
             column=0,
             sticky=tk.E)
         self.widgets['btn_connect'] = tk.Button(
-            self,
+            self.frames['connect'],
             text='Connect to Board',
             command=self.connect_to_board)
         self.widgets['btn_connect'].grid(
@@ -142,76 +157,110 @@ class PyboardGUI(tk.Frame):
             sticky=tk.W)
 
     def create_board_widgets(self):
-        # TODO: each group should be a separate tk.Frame
+        self.frames['management'] = tk.LabelFrame(
+            self,
+            text='Board management',
+            padx=5,
+            pady=5
+        )
+        self.frames['management'].grid(
+            row=0, column=1, sticky=tk.NW)
+
         # Files listbox widget group
-        self.board_widgets['label_files'] = tk.Label(
-            self, text='Files on board:')
-        self.board_widgets['label_files'].grid(
+        self.frames['files_board'] = tk.LabelFrame(
+            self.frames['management'], text='Files on board:')
+        self.frames['files_board'].grid(
             row=0,
-            column=2,
+            column=0,
             sticky=tk.W)
         self.board_widgets['listbox_files'] = tk.Listbox(
-            self, selectmode=tk.SINGLE)
+            self.frames['files_board'], selectmode=tk.SINGLE)
         self.board_widgets['listbox_files'].grid(
-            row=1,
-            column=2,
-            rowspan=10,
+            row=0,
+            column=0,
             sticky=tk.W)
         self.board_widgets['btn_refresh_files'] = tk.Button(
-            self,
+            self.frames['management'],
             text='Refresh files',
             command=self.update_files_board_listbox)
         self.board_widgets['btn_refresh_files'].grid(
-            row=12, column=2, sticky=tk.W)
+            row=1, column=0, sticky=tk.W)
         self.board_widgets['btn_view_file'] = tk.Button(
-            self,
+            self.frames['management'],
             text='View selected file',
             command=self.view_file_board_listbox)
         self.board_widgets['btn_view_file'].grid(
-            row=13, column=2, sticky=tk.W)
-        self.board_widgets['btn_delete_file'] = tk.Button(
-            self,
-            text='Delete selected file',
-            command=self.delete_file_board)
-        self.board_widgets['btn_delete_file'].grid(
-            row=15, column=2, sticky=tk.W)
+            row=2, column=0, sticky=tk.W)
         self.board_widgets['btn_upload_file'] = tk.Button(
-            self,
+            self.frames['management'],
             text='Upload file to board',
             command=self.upload_file_board)
         self.board_widgets['btn_upload_file'].grid(
-            row=17, column=2, sticky=tk.W)
-        self.board_widgets['btn_exec_file'] = tk.Button(
+            row=3, column=0, sticky=tk.W)
+        self.board_widgets['btn_delete_file'] = tk.Button(
+            self.frames['management'],
+            text='Delete selected file',
+            command=self.delete_file_board)
+        self.board_widgets['btn_delete_file'].grid(
+            row=4, column=0, sticky=tk.W, pady=20)
+
+    def create_view_widgets(self):
+        self.frames['file_view'] = tk.LabelFrame(
             self,
+            text='File view',
+            padx=5,
+            pady=5
+        )
+        self.frames['file_view'].grid(
+            row=0, column=2, sticky=tk.W)
+        # File view widget
+        self.board_widgets['text_view_file'] = tkst.ScrolledText(
+            self.frames['file_view'], state=tk.DISABLED, height=20, width=50, wrap="none")
+        self.board_widgets['text_view_file'].grid(
+            row=0, column=0, sticky=tk.W)
+
+    def create_console_widgets(self):
+        # TODO: implement serial console
+        self.frames['console'] = tk.LabelFrame(
+            self,
+            text='Serial console',
+            padx=5,
+            pady=5
+        )
+        self.frames['console'].grid(
+            row=1, column=0, columnspan=3, sticky=tk.NSEW)
+
+        # Console widget
+        self.board_widgets['text_console'] = tkst.ScrolledText(
+            self.frames['console'], state=tk.DISABLED, height=10, width=100)
+        self.board_widgets['text_console'].grid(
+            row=0, column=0, columnspan=3, sticky=tk.W)
+
+        # Exec host file
+        self.board_widgets['btn_exec_file'] = tk.Button(
+            self.frames['console'],
             text='Pick and run file from host',
             command=self.exec_host_file_board)
         self.board_widgets['btn_exec_file'].grid(
-            row=18, column=2, sticky=tk.W)
+            row=1, column=2, sticky=tk.SE)
 
-        # File view widget
-        self.board_widgets['label_view_file'] = tk.Label(
-            self, text='File contents:')
-        self.board_widgets['label_view_file'].grid(
-            row=0,
-            column=3,
-            sticky=tk.W)
-        self.board_widgets['text_view_file'] = tkst.ScrolledText(
-            self, state=tk.DISABLED, height=15, width=40, wrap="none")
-        self.board_widgets['text_view_file'].grid(
-            row=1, column=3, rowspan=20, sticky=tk.W)
+        # serial command entry
 
-        # Console widget
-        self.board_widgets['label_console'] = tk.Label(
-            self, text='Board output:')
-        self.board_widgets['label_console'].grid(
-            row=20,
-            column=1,
-            columnspan=3,
-            sticky=tk.W)
-        self.board_widgets['text_console'] = tkst.ScrolledText(
-            self, state=tk.DISABLED, height=10, width=80)
-        self.board_widgets['text_console'].grid(
-            row=21, column=1, rowspan=5, columnspan=3, sticky=tk.W)
+    def create_program_log_widgets(self):
+        self.frames['log'] = tk.LabelFrame(
+            self,
+            text='Program log',
+            padx=5,
+            pady=5
+        )
+        self.frames['log'].grid(
+            row=2, column=0, columnspan=3, sticky=tk.S)
+
+        # Logging widget
+        self.board_widgets['log'] = tkst.ScrolledText(
+            self.frames['log'], state=tk.DISABLED, height=5, width=100)
+        self.board_widgets['log'].grid(
+            row=0, column=0, sticky=tk.W)
 
     def disable_board_widgets(self):
         for widget in self.board_widgets.values():
@@ -235,7 +284,7 @@ class PyboardGUI(tk.Frame):
     #     return
 
     def exec_host_file_board(self):
-        # TODO: redirect sys.stdout.buffer to text
+        # TODO: redirect sys.stdout.buffer to serial console
         try:
             selected_file = tkfd.askopenfile(defaultextension='py')
             filename = selected_file.name
@@ -389,16 +438,14 @@ class PyboardGUI(tk.Frame):
 
     @staticmethod
     def get_serial_ports() -> List[str]:
-        return [p.device for p in serial.tools.list_ports.comports()]
+        ports = [p.device for p in serial.tools.list_ports.comports()]
+        if len(ports) < 1:
+            return ['']
+        else:
+            return ports
 
 
 def run_main_window():
-    logging.basicConfig(format='%(asctime)s %(message)s',
-                        datefmt='%m/%d/%Y %I:%M:%S %p')
-    # TODO: logger should also send to text_console
-    log = logging.getLogger()
-    sys.stdout = LoggerWriter(log.debug)
-    sys.stderr = LoggerWriter(log.warning)
     root = tk.Tk()
     app = PyboardGUI(master=root)
     app.mainloop()

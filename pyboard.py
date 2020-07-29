@@ -71,11 +71,16 @@ import sys
 import time
 import os
 
-try:
-    stdout = sys.stdout.buffer
-except AttributeError:
-    # Python2 doesn't have buffer attr
-    stdout = sys.stdout
+# try:
+#     stdout = sys.stdout.buffer
+# except AttributeError:
+#     # Python2 doesn't have buffer attr
+stdout = sys.stdout
+
+
+def reset_stdout(new_stdout):
+    global stdout
+    stdout = new_stdout
 
 
 def stdout_write_bytes(b):
