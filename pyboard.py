@@ -370,9 +370,12 @@ class Pyboard:
             command_bytes = bytes(command, encoding="utf8")
 
         # check we have a prompt
+        # TODO: handle case if we have "." and not ">"
         data = self.read_until(1, b">")
         if not data.endswith(b">"):
-            raise PyboardError("could not enter raw repl")
+            data = self.read_until(1, b".")
+            if not data.endswith(b"."):
+                raise PyboardError("could not enter raw repl")
 
         # write command
         for i in range(0, len(command_bytes), 256):

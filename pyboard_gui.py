@@ -1,4 +1,4 @@
-from typing import List, Dict
+from typing import List, Dict, Set, Any
 import logging
 import tkinter as tk
 import tkinter.filedialog as tkfd
@@ -10,21 +10,21 @@ import serial.tools.list_ports
 import os
 import sys
 from io import StringIO
-
-
-# TODO: tkinter Text widgets need to expand as window expands
+import copy
 
 
 class StdoutRedirector(StringIO):
-    def __init__(self, text_widget):
+    def __init__(self, text_widget: tk.Text):
         super().__init__()
         self.text_space = text_widget
 
-    def write(self, string):
+    def write(self, string: Any):
         self.text_space.configure(state=tk.NORMAL)
         self.text_space.insert(tk.END, string)
         self.text_space.see(tk.END)
         self.text_space.configure(state=tk.DISABLED)
+        if type(string) != str and '\n' in string.decode('utf8'):
+            self.text_space.update_idletasks()
 
 
 class PyboardGUI(tk.Frame):
@@ -32,6 +32,8 @@ class PyboardGUI(tk.Frame):
         super().__init__(master)
         self.master = master
         self.master.minsize(800, 600)
+        self.master.rowconfigure(0, weight=3)
+        self.master.columnconfigure(0, weight=3)
         self.winfo_toplevel().title('Pyboard.py GUI')
         self.master.protocol("WM_DELETE_WINDOW", self.quit_clean)
         self.widgets = {}
@@ -40,7 +42,9 @@ class PyboardGUI(tk.Frame):
         self.console_widgets = {}
         self.pyboard = None
         self.tk_vars = {}
-        self.grid()
+        self.grid(sticky=tk.NSEW, column=0, row=0)
+        self.columnconfigure(2, weight=3)
+        self.rowconfigure(1, weight=3)
         self.create_widgets()
         self.create_board_widgets()
         self.create_view_widgets()
@@ -48,6 +52,7 @@ class PyboardGUI(tk.Frame):
         self.create_program_log_widgets()
         self.disable_board_widgets()
         self.disable_console_widgets()
+        self.update_serial_ports()
         self.lift()
         self.safe_files = ['boot.py']
         self.logging_redirector = StdoutRedirector(self.console_widgets['log'])
@@ -94,14 +99,11 @@ class PyboardGUI(tk.Frame):
             row=2,
             column=0,
             sticky=tk.E)
-        ports = self.get_serial_ports()
         self.tk_vars['port'] = tk.StringVar(self)
-        self.tk_vars['port'].set(ports[0])
         self.widgets['dropdown_port'] = tk.OptionMenu(
             self.frames['connect'],
             self.tk_vars['port'],
-            ports[0],
-            *ports[1:])
+            '')
         self.widgets['dropdown_port'].grid(
             row=2,
             column=1,
@@ -145,6 +147,25 @@ class PyboardGUI(tk.Frame):
             column=1,
             sticky=tk.W)
 
+    @staticmethod
+    def get_optionmenu_options(optionmenu: tk.OptionMenu) -> Set[str]:
+        return {optionmenu['menu'].entrycget(idx, 'label')
+                for idx in range(optionmenu['menu'].index(tk.END) + 1)}
+
+    def update_serial_ports(self):
+        ports = self.get_serial_ports()
+        current_options = self.get_optionmenu_options(self.widgets['dropdown_port'])
+        if current_options != ports:
+            self.widgets['dropdown_port']['menu'].delete(0, tk.END)
+            if len(ports) > 0:
+                for p in ports:
+                    self.widgets['dropdown_port']['menu'].add_command(
+                        label=p, command=lambda new_value=p: self.tk_vars['port'].set(new_value))
+                self.tk_vars['port'].set(self.widgets['dropdown_port']['menu'].entrycget(0, 'label'))
+            if self.pyboard is not None:
+                self.destroy_pyboard()
+        self.master.after(500, self.update_serial_ports)
+
     def create_board_widgets(self):
         self.frames['management'] = tk.LabelFrame(
             self,
@@ -163,7 +184,8 @@ class PyboardGUI(tk.Frame):
             column=0,
             sticky=tk.W)
         self.board_widgets['listbox_files'] = tk.Listbox(
-            self.frames['files_board'], selectmode=tk.SINGLE)
+            self.frames['files_board'], selectmode=tk.SINGLE,
+            height=5)
         self.board_widgets['listbox_files'].grid(
             row=0,
             column=0,
@@ -191,7 +213,7 @@ class PyboardGUI(tk.Frame):
             text='Delete selected file',
             command=self.delete_file_board)
         self.board_widgets['btn_delete_file'].grid(
-            row=4, column=0, sticky=tk.W, pady=20)
+            row=4, column=0, sticky=tk.W, pady=4)
 
     def create_view_widgets(self):
         self.frames['file_view'] = tk.LabelFrame(
@@ -201,15 +223,16 @@ class PyboardGUI(tk.Frame):
             pady=5
         )
         self.frames['file_view'].grid(
-            row=0, column=2, sticky=tk.W)
+            row=0, column=2, sticky=tk.W+tk.E+tk.S+tk.N)
+        self.frames['file_view'].columnconfigure(0, weight=3)
+
         # File view widget
         self.board_widgets['text_view_file'] = tkst.ScrolledText(
-            self.frames['file_view'], state=tk.DISABLED, height=20, width=50, wrap="none")
+            self.frames['file_view'], state=tk.DISABLED, height=12, width=50, wrap="none")
         self.board_widgets['text_view_file'].grid(
-            row=0, column=0, sticky=tk.W)
+            row=0, column=0, sticky=tk.NSEW)
 
     def create_console_widgets(self):
-        # TODO: implement serial console
         self.frames['console'] = tk.LabelFrame(
             self,
             text='Serial console',
@@ -218,22 +241,32 @@ class PyboardGUI(tk.Frame):
         )
         self.frames['console'].grid(
             row=1, column=0, columnspan=3, sticky=tk.NSEW)
+        self.frames['console'].columnconfigure(1, weight=3)
+        self.frames['console'].rowconfigure(0, weight=3)
 
         # Console widget
         self.console_widgets['text_serial'] = tkst.ScrolledText(
-            self.frames['console'], state=tk.DISABLED, height=10, width=100)
+            self.frames['console'], state=tk.DISABLED, height=15, width=100,
+            bg='black', fg='white')
         self.console_widgets['text_serial'].grid(
-            row=0, column=0, columnspan=3, sticky=tk.W)
+            row=0, column=0, columnspan=3, sticky=tk.NSEW)
 
         # Console entry
-        self.console_widgets['entry_serial'] = tk.Entry(
+        self.console_widgets['entry_serial'] = tkst.ScrolledText(
             self.frames['console'],
-            text='Type your command here',
-            width=80,
+            width=80, height=2,
             font='TkFixedFont')
         self.console_widgets['entry_serial'].grid(
-            row=1, column=1, columnspan=2, sticky=tk.SW, ipadx=1, ipady=1)
-        self.console_widgets['entry_serial'].bind('<Return>', self.send_console_command)
+            row=1, column=0, columnspan=3, sticky=tk.NSEW, ipadx=1, ipady=1)
+        self.console_widgets['entry_serial'].bind(
+            '<Control-Return>', lambda x: self.send_console_command())
+
+        self.console_widgets['btn_send_command'] = tk.Button(
+            self.frames['console'],
+            text='Send command',
+            command=self.send_console_command)
+        self.console_widgets['btn_send_command'].grid(
+            row=2, column=2, sticky=tk.SE, padx=4)
 
         # Exec host file
         self.console_widgets['btn_exec_file'] = tk.Button(
@@ -241,13 +274,15 @@ class PyboardGUI(tk.Frame):
             text='Pick and run file from host',
             command=self.exec_host_file_board)
         self.console_widgets['btn_exec_file'].grid(
-            row=1, column=0, sticky=tk.SW, padx=4)
+            row=2, column=0, sticky=tk.SW, padx=4)
 
-    def send_console_command(self, event=None):
-        typed_command = self.console_widgets['entry_serial'].get()
+    def send_console_command(self):
+        typed_command = copy.deepcopy(self.console_widgets['entry_serial'].get('1.0', tk.END))
+        self.console_widgets['entry_serial'].delete(1.0, tk.END)
         self.serial_redirector.write(f'>> {typed_command}\n')
+        self.console_widgets['text_serial'].update_idletasks()
         self.exec_command(typed_command)
-        self.console_widgets['entry_serial'].delete(0, tk.END)
+        return 'break'  # needed to prevent extra newline inside text widget
 
     def create_program_log_widgets(self):
         self.frames['log'] = tk.LabelFrame(
@@ -257,13 +292,15 @@ class PyboardGUI(tk.Frame):
             pady=5
         )
         self.frames['log'].grid(
-            row=2, column=0, columnspan=3, sticky=tk.S)
+            row=2, column=0, columnspan=3, sticky=tk.NSEW)
+        self.frames['log'].columnconfigure(0, weight=3)
+        self.frames['log'].rowconfigure(0, weight=3)
 
         # Logging widget
         self.console_widgets['log'] = tkst.ScrolledText(
             self.frames['log'], state=tk.DISABLED, height=5, width=100)
         self.console_widgets['log'].grid(
-            row=0, column=0, sticky=tk.W)
+            row=0, column=0, sticky=tk.NSEW)
 
     def disable_board_widgets(self):
         for widget in self.board_widgets.values():
@@ -299,8 +336,8 @@ class PyboardGUI(tk.Frame):
     def exec_command(self, command: str):
         try:
             self.pyboard.enter_raw_repl()
-            ret, ret_err = self.pyboard.exec_raw(
-                command, timeout=None, data_consumer=pyb.stdout_write_bytes)
+            ret = self.pyboard.exec_(
+                command, data_consumer=pyb.stdout_write_bytes)
             self.pyboard.exit_raw_repl()
             return ret
         except Exception as e:
@@ -424,6 +461,7 @@ class PyboardGUI(tk.Frame):
         self.update_connect_text_and_buttons()
         self.disable_board_widgets()
         self.disable_console_widgets()
+        self.update_serial_ports()
         return
 
     def create_pyboard(self):
@@ -464,12 +502,12 @@ class PyboardGUI(tk.Frame):
         self.master.destroy()
 
     @staticmethod
-    def get_serial_ports() -> List[str]:
+    def get_serial_ports() -> Set[str]:
         ports = [p.device for p in serial.tools.list_ports.comports()]
         if len(ports) < 1:
-            return ['']
+            return {'', }
         else:
-            return ports
+            return set(ports)
 
 
 def run_main_window():
