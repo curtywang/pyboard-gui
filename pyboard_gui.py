@@ -1,6 +1,7 @@
 from typing import List, Dict, Set, Any
 import logging
 import tkinter as tk
+from tkinter.ttk import Progressbar
 import tkinter.filedialog as tkfd
 import tkinter.messagebox as tkmb
 import tkinter.scrolledtext as tkst
@@ -471,6 +472,7 @@ class PyboardGUI(tk.Frame):
             return True
         except Exception as e:
             logging.exception(e)
+            tkmb.showerror('Creation failed!', 'Double-check that the baudrate is correct.')
             return False
 
     def update_files_board_listbox(self):

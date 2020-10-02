@@ -441,6 +441,7 @@ class Pyboard:
         self.exec_("f.close()")
 
     def fs_put(self, src, dest, chunk_size=256):
+        self.exec_("import os")
         self.exec_("f=open('%s','wb')\nw=f.write" % dest)
         with open(src, "rb") as f:
             while True:
@@ -451,6 +452,7 @@ class Pyboard:
                     self.exec_("w(b" + repr(data) + ")")
                 else:
                     self.exec_("w(" + repr(data) + ")")
+                    self.exec_("if hasattr(os, 'sync'):\n    os.sync()")
         self.exec_("f.close()")
 
     def fs_mkdir(self, dir):
